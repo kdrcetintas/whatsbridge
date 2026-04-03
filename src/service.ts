@@ -33,44 +33,51 @@ function assertAdmin(): void {
   }
 }
 
-// ── Windows (sc.exe) ─────────────────────────────────────────────────────────
-// node-windows is incompatible with pkg binaries (tries to write into the
-// read-only snapshot). We use sc.exe directly instead.
+// ── Windows (Task Scheduler) ──────────────────────────────────────────────────
+// sc.exe requires the binary to implement the Windows Service Control protocol
+// (SERVICE_RUNNING status etc.) which a regular Node/pkg process does not.
+// Task Scheduler has no such requirement and works with any executable.
 
-function installWindows(config: Config): Promise<void> {
-  const name    = serviceName(config);
-  const binExe  = process.execPath;
-  const cwd     = process.cwd();
-  // binPath passed to sc must include the --cwd flag so the service knows
-  // which instance directory to use when SCM starts it.
-  const binPath = `"${binExe}" start --cwd "${cwd}"`;
-
+function runPs(script: string): void {
+  const tmp = path.join(require('os').tmpdir(), `wb-${Date.now()}.ps1`);
+  fs.writeFileSync(tmp, script, 'utf-8');
   try {
-    execSync(`sc.exe create "${name}" binPath= ${JSON.stringify(binPath)} start= auto DisplayName= "${name}"`, { stdio: 'pipe' });
+    execSync(`powershell -ExecutionPolicy Bypass -NonInteractive -File "${tmp}"`, { stdio: 'pipe' });
   } catch (e: unknown) {
     const msg = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
-    if (msg.includes('1073')) throw new Error('Service is already installed.');
-    throw new Error(`sc.exe create failed: ${msg.trim()}`);
+    throw new Error(msg.trim());
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
   }
+}
 
-  try {
-    execSync(`sc.exe description "${name}" "WhatsBridge — ${config.instanceName} (port ${config.port})"`, { stdio: 'ignore' });
-    execSync(`sc.exe failure "${name}" reset= 60 actions= restart/5000/restart/10000/restart/30000`, { stdio: 'ignore' });
-    execSync(`sc.exe start "${name}"`, { stdio: 'pipe' });
-  } catch { /* non-fatal */ }
+function installWindows(config: Config): Promise<void> {
+  const name = serviceName(config).replace(/'/g, "''");
+  const exe  = process.execPath.replace(/'/g, "''");
+  const cwd  = process.cwd().replace(/'/g, "''");
 
+  runPs(`
+$action   = New-ScheduledTaskAction -Execute '${exe}' -Argument 'start --cwd "${cwd}"'
+$trigger  = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet \`
+              -RestartCount 5 \`
+              -RestartInterval (New-TimeSpan -Minutes 1) \`
+              -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+Register-ScheduledTask -TaskName '${name}' \`
+  -Action $action -Trigger $trigger \`
+  -Settings $settings -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName '${name}'
+`);
   return Promise.resolve();
 }
 
 function uninstallWindows(config: Config): Promise<void> {
-  const name = serviceName(config);
-  try { execSync(`sc.exe stop "${name}"`, { stdio: 'ignore' }); } catch { /* already stopped */ }
-  try {
-    execSync(`sc.exe delete "${name}"`, { stdio: 'pipe' });
-  } catch (e: unknown) {
-    const msg = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
-    throw new Error(`sc.exe delete failed: ${msg.trim()}`);
-  }
+  const name = serviceName(config).replace(/'/g, "''");
+  runPs(`
+Stop-ScheduledTask -TaskName '${name}' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false
+`);
   return Promise.resolve();
 }
 
