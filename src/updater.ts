@@ -3,6 +3,7 @@ import fs    from 'fs';
 import path  from 'path';
 import os    from 'os';
 import { spawn } from 'child_process';
+import { loadConfig } from './config';
 
 const REPO = 'kdrcetintas/whatsbridge';
 
@@ -115,10 +116,23 @@ function replaceBinary(newFile: string): void {
     try { fs.unlinkSync(oldFile); } catch { /* ignore */ }
     fs.renameSync(current, oldFile);
     fs.renameSync(newFile, current);
-    // Schedule deletion of .old on next Windows start via a temp bat
+
+    // Read service name so the bat can stop the service before deleting .old
+    // (the service process holds an open handle to .old while it is running).
+    let svcName = '';
+    try { svcName = `WhatsBridge - ${loadConfig().instanceName}`; } catch { /* no config */ }
+
+    const stopLines  = svcName
+      ? `sc stop "${svcName}" >nul 2>&1\ntimeout /t 5 /nobreak >nul\n`
+      : '';
+    const startLines = svcName
+      ? `sc start "${svcName}" >nul 2>&1\n`
+      : '';
+
+    // Wait 3 s before stopping so any in-flight HTTP response can be flushed first.
     const bat = path.join(os.tmpdir(), 'whatsbridge-cleanup.bat');
     fs.writeFileSync(bat,
-      `@echo off\n:loop\ndel "${oldFile}" 2>nul\nif exist "${oldFile}" (timeout /t 2 >nul & goto loop)\ndel "%~f0"\n`
+      `@echo off\ntimeout /t 3 /nobreak >nul\n${stopLines}:loop\ndel "${oldFile}" 2>nul\nif exist "${oldFile}" (timeout /t 2 /nobreak >nul & goto loop)\n${startLines}del "%~f0"\n`
     );
     try { spawn('cmd.exe', ['/c', 'start', '', '/min', bat], { detached: true, stdio: 'ignore' }).unref(); } catch { /* ignore */ }
   } else {
