@@ -6,9 +6,25 @@ WhatsApp REST API server with a web dashboard. Run multiple instances on the sam
 
 ## Getting Started
 
-### Option A — Download pre-built binary (no Node.js required)
+### Option A — One-line install (no Node.js required)
 
-Download the latest binary for your platform from [Releases](https://github.com/kdrcetintas/whatsapp-rest-api/releases):
+Run this in the directory where you want to use WhatsBridge:
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/kdrcetintas/whatsbridge/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+iex (iwr "https://raw.githubusercontent.com/kdrcetintas/whatsbridge/main/scripts/install.ps1").Content
+```
+
+Downloads the correct binary for your platform into the current directory.
+
+### Option B — Manual download
+
+Download the binary for your platform from [Releases](https://github.com/kdrcetintas/whatsbridge/releases/latest):
 
 | Platform | File |
 |---|---|
@@ -16,24 +32,13 @@ Download the latest binary for your platform from [Releases](https://github.com/
 | Linux | `whatsbridge-vX.X.X-linux-x64` |
 | macOS (Apple Silicon) | `whatsbridge-vX.X.X-macos-arm64` |
 
-On Linux/macOS, make the file executable first:
+On Linux/macOS, make it executable: `chmod +x whatsbridge-*`
+
+### Option C — Build from source (requires Node.js 20+)
 
 ```bash
-chmod +x whatsbridge-vX.X.X-macos-arm64
-./whatsbridge-vX.X.X-macos-arm64 init
-```
-
-### Option B — Install from source (requires Node.js 20+)
-
-```bash
-npm install -g github:kdrcetintas/whatsapp-rest-api
-```
-
-### Option C — Build locally
-
-```bash
-git clone https://github.com/kdrcetintas/whatsapp-rest-api.git
-cd whatsapp-rest-api
+git clone https://github.com/kdrcetintas/whatsbridge.git
+cd whatsbridge
 npm install
 npm run package        # → bin/whatsbridge-vX.X.X-<platform>-<arch>
 ```
