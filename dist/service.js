@@ -100,7 +100,7 @@ function installLinux(config) {
         'Type=simple',
         `WorkingDirectory=${cwd}`,
         `ExecStart=${execStart}`,
-        'Restart=on-failure',
+        'Restart=always',
         'RestartSec=5',
         'StandardOutput=journal',
         'StandardError=journal',

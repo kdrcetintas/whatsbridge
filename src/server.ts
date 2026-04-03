@@ -9,6 +9,7 @@ import { verifyPassword, requireSession, requireApiKey } from './auth';
 import { connect, getStatus, getQRCode, getAccountInfo } from './whatsapp';
 import { initDb, getMessage, listMessages, getStats } from './db';
 import { sendNow, sendQueued, getQueueLength, getNextSendDelay, recoverPending } from './queue';
+import { currentVersion, checkUpdate, performUpdate } from './updater';
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -54,9 +55,10 @@ export function createApp(config: Config): express.Application {
 
   // ── Web UI (session protected) ────────────────────────────────────────────
 
-  app.get('/', requireSession, (_req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-  });
+  app.get('/',     requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'status.html')));
+  app.get('/send', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'send.html')));
+  app.get('/logs', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'logs.html')));
+  app.get('/docs', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'docs.html')));
 
   app.get('/settings', requireSession, (req: Request, res: Response) => {
     res.json({
@@ -84,6 +86,36 @@ export function createApp(config: Config): express.Application {
 
   app.get('/stats', requireSession, (_req, res) => {
     res.json(getStats());
+  });
+
+  app.get('/version', requireSession, (_req, res) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    res.json({ version: currentVersion(), isPkg: !!(process as any).pkg });
+  });
+
+  app.get('/update/check', requireSession, async (_req, res) => {
+    try {
+      const info = await checkUpdate();
+      res.json(info);
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/update/apply', requireSession, async (_req, res) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!(process as any).pkg) {
+      res.status(400).json({ error: 'Self-update is only supported when running as a compiled binary.' });
+      return;
+    }
+    try {
+      const newVersion = await performUpdate();
+      res.json({ success: true, version: newVersion });
+      // Give the response time to flush, then restart so the service manager picks up the new binary
+      setTimeout(() => process.exit(0), 800);
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.get('/logs/stream', requireSession, (req: Request, res: Response) => {

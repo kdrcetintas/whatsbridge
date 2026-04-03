@@ -15,6 +15,7 @@ const auth_1 = require("./auth");
 const whatsapp_1 = require("./whatsapp");
 const db_1 = require("./db");
 const queue_1 = require("./queue");
+const updater_1 = require("./updater");
 const PUBLIC_DIR = path_1.default.join(__dirname, '..', 'public');
 function createApp(config) {
     const app = (0, express_1.default)();
@@ -51,9 +52,10 @@ function createApp(config) {
         res.json({ success: true });
     });
     // ── Web UI (session protected) ────────────────────────────────────────────
-    app.get('/', auth_1.requireSession, (_req, res) => {
-        res.sendFile(path_1.default.join(PUBLIC_DIR, 'index.html'));
-    });
+    app.get('/', auth_1.requireSession, (_req, res) => res.sendFile(path_1.default.join(PUBLIC_DIR, 'status.html')));
+    app.get('/send', auth_1.requireSession, (_req, res) => res.sendFile(path_1.default.join(PUBLIC_DIR, 'send.html')));
+    app.get('/logs', auth_1.requireSession, (_req, res) => res.sendFile(path_1.default.join(PUBLIC_DIR, 'logs.html')));
+    app.get('/docs', auth_1.requireSession, (_req, res) => res.sendFile(path_1.default.join(PUBLIC_DIR, 'docs.html')));
     app.get('/settings', auth_1.requireSession, (req, res) => {
         res.json({
             instanceName: config.instanceName,
@@ -79,6 +81,35 @@ function createApp(config) {
     });
     app.get('/stats', auth_1.requireSession, (_req, res) => {
         res.json((0, db_1.getStats)());
+    });
+    app.get('/version', auth_1.requireSession, (_req, res) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        res.json({ version: (0, updater_1.currentVersion)(), isPkg: !!process.pkg });
+    });
+    app.get('/update/check', auth_1.requireSession, async (_req, res) => {
+        try {
+            const info = await (0, updater_1.checkUpdate)();
+            res.json(info);
+        }
+        catch (err) {
+            res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+    });
+    app.post('/update/apply', auth_1.requireSession, async (_req, res) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (!process.pkg) {
+            res.status(400).json({ error: 'Self-update is only supported when running as a compiled binary.' });
+            return;
+        }
+        try {
+            const newVersion = await (0, updater_1.performUpdate)();
+            res.json({ success: true, version: newVersion });
+            // Give the response time to flush, then restart so the service manager picks up the new binary
+            setTimeout(() => process.exit(0), 800);
+        }
+        catch (err) {
+            res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
     });
     app.get('/logs/stream', auth_1.requireSession, (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');

@@ -65,5 +65,8 @@
   "docs.copied": "Kopyalandı!",
   "docs.status.desc": "Mevcut bağlantı durumunu döner.",
   "docs.send.desc": "Metin mesajı gönderir. Numara WhatsApp'ta kayıtlı olmalıdır.",
-  "docs.image.desc": "URL üzerinden görsel mesaj gönderir."
+  "docs.image.desc": "URL üzerinden görsel mesaj gönderir.",
+
+  "update.title": "Yazılım Güncellemesi",
+  "update.check": "Güncelleme Kontrol Et"
 }

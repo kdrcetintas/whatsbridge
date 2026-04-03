@@ -8,7 +8,7 @@ form.addEventListener('submit', async function (e) {
   e.preventDefault();
   btn.disabled    = true;
   btn.textContent = t('login.submitting');
-  errorEl.classList.remove('show');
+  errorEl.classList.add('d-none');
 
   try {
     const res = await fetch('/auth/login', {
@@ -23,13 +23,13 @@ form.addEventListener('submit', async function (e) {
       window.location.href = '/';
     } else {
       errorEl.textContent = t('login.error.invalid');
-      errorEl.classList.add('show');
+      errorEl.classList.remove('d-none');
       btn.disabled    = false;
       btn.textContent = t('login.submit');
     }
   } catch {
     errorEl.textContent = t('login.error.server');
-    errorEl.classList.add('show');
+    errorEl.classList.remove('d-none');
     btn.disabled    = false;
     btn.textContent = t('login.submit');
   }
@@ -37,4 +37,6 @@ form.addEventListener('submit', async function (e) {
 
 document.addEventListener('i18n:updated', function () {
   if (!btn.disabled) btn.textContent = t('login.submit');
+  var langLabel = document.getElementById('lang-label');
+  if (langLabel) langLabel.textContent = (window.getCurrentLocale() || 'en').toUpperCase();
 });

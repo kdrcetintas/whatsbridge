@@ -65,5 +65,8 @@
   "docs.copied": "Copied!",
   "docs.status.desc": "Returns the current connection status.",
   "docs.send.desc": "Sends a text message. The number must be registered on WhatsApp.",
-  "docs.image.desc": "Sends an image message from a URL."
+  "docs.image.desc": "Sends an image message from a URL.",
+
+  "update.title": "Software Update",
+  "update.check": "Check for Updates"
 }
