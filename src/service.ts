@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { execSync } from 'child_process';
 import { Config } from './config';
 
@@ -33,52 +34,50 @@ function assertAdmin(): void {
   }
 }
 
-// ── Windows (Task Scheduler) ──────────────────────────────────────────────────
-// sc.exe requires the binary to implement the Windows Service Control protocol
-// (SERVICE_RUNNING status etc.) which a regular Node/pkg process does not.
-// Task Scheduler has no such requirement and works with any executable.
+// ── Windows (NSSM) ───────────────────────────────────────────────────────────
+// sc.exe requires the binary to implement the Windows Service Control protocol.
+// NSSM wraps any executable as a proper SCM-compatible service (shows in services.msc).
 
-function runPs(script: string): void {
-  const tmp = path.join(require('os').tmpdir(), `wb-${Date.now()}.ps1`);
-  fs.writeFileSync(tmp, script, 'utf-8');
+function extractNssm(): string {
+  const dest = path.join(os.tmpdir(), 'whatsbridge-nssm.exe');
+  if (fs.existsSync(dest)) return dest;
+
+  // When running as pkg binary, __dirname is inside the snapshot.
+  // The nssm.exe asset is accessible via path relative to __dirname.
+  const src = path.join(__dirname, '..', 'vendor', 'nssm.exe');
+  fs.copyFileSync(src, dest);
+  return dest;
+}
+
+function runNssm(args: string[]): void {
+  const nssm = extractNssm();
   try {
-    execSync(`powershell -ExecutionPolicy Bypass -NonInteractive -File "${tmp}"`, { stdio: 'pipe' });
+    execSync(`"${nssm}" ${args.map(a => `"${a}"`).join(' ')}`, { stdio: 'pipe' });
   } catch (e: unknown) {
-    const msg = (e as { stderr?: Buffer }).stderr?.toString() ?? String(e);
-    throw new Error(msg.trim());
-  } finally {
-    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    const err = e as { stderr?: Buffer; stdout?: Buffer };
+    const msg = (err.stderr?.toString() ?? err.stdout?.toString() ?? String(e)).trim();
+    throw new Error(msg);
   }
 }
 
-function installWindows(config: Config): Promise<void> {
-  const name = serviceName(config).replace(/'/g, "''");
-  const exe  = process.execPath.replace(/'/g, "''");
-  const cwd  = process.cwd().replace(/'/g, "''");
+function installWindows(config: Config): void {
+  const name = serviceName(config);
+  const exe  = process.execPath;
+  const cwd  = process.cwd();
 
-  runPs(`
-$action   = New-ScheduledTaskAction -Execute '${exe}' -Argument 'start --cwd "${cwd}"'
-$trigger  = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet \`
-              -RestartCount 5 \`
-              -RestartInterval (New-TimeSpan -Minutes 1) \`
-              -ExecutionTimeLimit (New-TimeSpan -Hours 0)
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
-Register-ScheduledTask -TaskName '${name}' \`
-  -Action $action -Trigger $trigger \`
-  -Settings $settings -Principal $principal -Force | Out-Null
-Start-ScheduledTask -TaskName '${name}'
-`);
-  return Promise.resolve();
+  runNssm(['install', name, exe, `start --cwd "${cwd}"`]);
+  runNssm(['set', name, 'AppDirectory', cwd]);
+  runNssm(['set', name, 'Start', 'SERVICE_AUTO_START']);
+  runNssm(['set', name, 'AppRestartDelay', '5000']);
+  runNssm(['set', name, 'ObjectName', 'LocalSystem']);
+  execSync(`sc start "${name}"`, { stdio: 'pipe' });
 }
 
-function uninstallWindows(config: Config): Promise<void> {
-  const name = serviceName(config).replace(/'/g, "''");
-  runPs(`
-Stop-ScheduledTask -TaskName '${name}' -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName '${name}' -Confirm:$false
-`);
-  return Promise.resolve();
+function uninstallWindows(config: Config): void {
+  const name = serviceName(config);
+  try { execSync(`sc stop "${name}"`, { stdio: 'ignore' }); } catch { /* already stopped */ }
+  // NSSM remove with confirmation bypass
+  runNssm(['remove', name, 'confirm']);
 }
 
 // ── Linux (systemd) ──────────────────────────────────────────────────────────
@@ -136,7 +135,7 @@ function uninstallLinux(config: Config): void {
 export async function installService(config: Config): Promise<void> {
   assertAdmin();
   if (process.platform === 'win32') {
-    await installWindows(config);
+    installWindows(config);
   } else if (process.platform === 'linux') {
     installLinux(config);
   } else {
@@ -147,7 +146,7 @@ export async function installService(config: Config): Promise<void> {
 export async function uninstallService(config: Config): Promise<void> {
   assertAdmin();
   if (process.platform === 'win32') {
-    await uninstallWindows(config);
+    uninstallWindows(config);
   } else if (process.platform === 'linux') {
     uninstallLinux(config);
   } else {
