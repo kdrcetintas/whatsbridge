@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: node20-linux-x64
+            artifact: whatsbridge-${{ github.ref_name }}-linux-x64
+          - os: windows-latest
+            target: node20-win-x64
+            artifact: whatsbridge-${{ github.ref_name }}-win-x64.exe
+          - os: macos-latest
+            target: node20-macos-arm64
+            artifact: whatsbridge-${{ github.ref_name }}-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Package binary
+        run: npx @yao-pkg/pkg package.json --target ${{ matrix.target }} --output ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            whatsbridge-${{ github.ref_name }}-linux-x64
+            whatsbridge-${{ github.ref_name }}-win-x64.exe
+            whatsbridge-${{ github.ref_name }}-macos-arm64
+          generate_release_notes: true
