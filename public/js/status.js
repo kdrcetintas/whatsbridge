@@ -100,9 +100,17 @@ async function loadUpdateVersion() {
       document.getElementById('btn-check-update').disabled = true;
       setUpdateResult('info', 'Self-update is only available in compiled binaries.');
     }
+    if (data.hasGithubToken) {
+      document.getElementById('github-token-input').placeholder = 'GitHub token (saved)';
+    }
   } catch { /* ignore */ }
 }
 loadUpdateVersion();
+
+function getGithubTokenHeader() {
+  var val = document.getElementById('github-token-input').value.trim();
+  return val ? { 'X-GitHub-Token': val } : {};
+}
 
 document.getElementById('btn-check-update').addEventListener('click', async function () {
   this.disabled    = true;
@@ -113,7 +121,7 @@ document.getElementById('btn-check-update').addEventListener('click', async func
   if (existing) existing.remove();
 
   try {
-    var res  = await fetch('/update/check');
+    var res  = await fetch('/update/check', { headers: getGithubTokenHeader() });
     var data = await res.json();
     if (data.error) {
       setUpdateResult('error', data.error);
@@ -146,7 +154,7 @@ async function applyUpdate() {
   setUpdateResult('info', 'Downloading update, please wait...');
 
   try {
-    var res  = await fetch('/update/apply', { method: 'POST' });
+    var res  = await fetch('/update/apply', { method: 'POST', headers: getGithubTokenHeader() });
     var data = await res.json();
     if (data.success) {
       setUpdateResult('ok', 'Updated to v' + data.version + '. Service restarting — page will reload automatically.');

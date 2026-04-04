@@ -3,7 +3,7 @@ import session from 'express-session';
 import path from 'path';
 import { exec } from 'child_process';
 import QRCode from 'qrcode';
-import { Config } from './config';
+import { Config, saveConfig } from './config';
 import { log, logBus, getRecentLogs, LogEntry } from './logger';
 import { verifyPassword, requireSession, requireApiKey } from './auth';
 import { connect, getStatus, getQRCode, getAccountInfo } from './whatsapp';
@@ -90,26 +90,36 @@ export function createApp(config: Config): express.Application {
 
   app.get('/version', requireSession, (_req, res) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    res.json({ version: currentVersion(), isPkg: !!(process as any).pkg });
+    res.json({ version: currentVersion(), isPkg: !!(process as any).pkg, hasGithubToken: !!config.githubToken });
   });
 
-  app.get('/update/check', requireSession, async (_req, res) => {
+  app.get('/update/check', requireSession, async (req, res) => {
+    const token = (req.headers['x-github-token'] as string | undefined) || config.githubToken;
+    if (token && token !== config.githubToken) {
+      config.githubToken = token;
+      saveConfig(config);
+    }
     try {
-      const info = await checkUpdate();
+      const info = await checkUpdate(token);
       res.json(info);
     } catch (err: unknown) {
       res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  app.post('/update/apply', requireSession, async (_req, res) => {
+  app.post('/update/apply', requireSession, async (req, res) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!(process as any).pkg) {
       res.status(400).json({ error: 'Self-update is only supported when running as a compiled binary.' });
       return;
     }
+    const token = (req.headers['x-github-token'] as string | undefined) || config.githubToken;
+    if (token && token !== config.githubToken) {
+      config.githubToken = token;
+      saveConfig(config);
+    }
     try {
-      const newVersion = await performUpdate();
+      const newVersion = await performUpdate(undefined, token);
       res.json({ success: true, version: newVersion });
       // Give the response time to flush, then restart so the service manager picks up the new binary
       setTimeout(() => process.exit(0), 800);

@@ -109,12 +109,23 @@ program
     // Keep old API key on overwrite so existing integrations don't break
     const apiKey = existing?.apiKey ?? crypto.randomBytes(24).toString('hex');
 
+    const { githubToken } = await inquirer.prompt<{ githubToken: string }>([
+      {
+        type: 'password',
+        name: 'githubToken',
+        message: 'GitHub Personal Access Token (optional, for private repo updates):',
+        mask: '*',
+        default: '',
+      },
+    ]);
+
     saveConfig({
       port: basic.port,
       instanceName: basic.instanceName,
       username: basic.username,
       passwordHash,
       apiKey,
+      githubToken: githubToken.trim() || existing?.githubToken,
     });
 
     const isUpdate = !!existing;
@@ -154,29 +165,54 @@ program
   .option('--check', 'Only check for updates, do not install')
   .action(async (opts: { check?: boolean }) => {
     console.log('\n  Checking for updates...');
-    try {
-      const info = await checkUpdate();
-      if (!info.hasUpdate) {
-        console.log(`  Already up to date (v${info.currentVersion}).\n`);
-        return;
-      }
-      console.log(`  New version available: ${info.latestVersion} (current: v${info.currentVersion})`);
-      if (opts.check) { console.log(); return; }
 
-      console.log('  Downloading update...');
-      let lastPct = -1;
-      const newVersion = await performUpdate((pct) => {
-        if (pct !== lastPct && pct % 10 === 0) {
-          process.stdout.write(`\r  Downloading... ${pct}%`);
-          lastPct = pct;
+    // Load stored token if available
+    let token: string | undefined;
+    try { token = loadConfig().githubToken; } catch { /* no config */ }
+
+    const doUpdate = async (t?: string): Promise<void> => {
+      try {
+        const info = await checkUpdate(t);
+        if (!info.hasUpdate) {
+          console.log(`  Already up to date (v${info.currentVersion}).\n`);
+          return;
         }
-      });
-      console.log(`\r  Updated to ${newVersion}. Restart to apply.\n`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`\n  Update failed: ${msg}\n`);
-      process.exit(1);
-    }
+        console.log(`  New version available: ${info.latestVersion} (current: v${info.currentVersion})`);
+        if (opts.check) { console.log(); return; }
+
+        console.log('  Downloading update...');
+        let lastPct = -1;
+        const newVersion = await performUpdate((pct) => {
+          if (pct !== lastPct && pct % 10 === 0) {
+            process.stdout.write(`\r  Downloading... ${pct}%`);
+            lastPct = pct;
+          }
+        }, t);
+        console.log(`\r  Updated to ${newVersion}. Restart to apply.\n`);
+
+        // Persist token if it was newly provided
+        if (t && t !== token) {
+          try { const cfg = loadConfig(); cfg.githubToken = t; saveConfig(cfg); } catch { /* ignore */ }
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'GITHUB_404' && !t) {
+          console.log('  Repository not found or private. A GitHub Personal Access Token is required.');
+          const { pat } = await inquirer.prompt<{ pat: string }>([{
+            type: 'password',
+            name: 'pat',
+            message: '  GitHub Personal Access Token:',
+            mask: '*',
+            validate: (v: string) => v.trim().length > 0 ? true : 'Token cannot be empty',
+          }]);
+          return doUpdate(pat.trim());
+        }
+        console.error(`\n  Update failed: ${msg}\n`);
+        process.exit(1);
+      }
+    };
+
+    await doUpdate(token);
   });
 
 // ── service ───────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ export interface Config {
   username: string;
   passwordHash: string;
   apiKey: string;
+  githubToken?: string;
 }
 
 const CONFIG_FILE = 'whatsbridge.config.json';

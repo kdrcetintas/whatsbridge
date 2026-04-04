@@ -95,7 +95,9 @@
           <div class="fw-semibold" data-i18n="update.title">Software Update</div>
           <div class="small text-muted" id="update-current-version"></div>
         </div>
-        <div id="update-actions">
+        <div id="update-actions" class="d-flex align-items-center gap-2 flex-wrap">
+          <input type="password" class="form-control form-control-sm" id="github-token-input"
+            placeholder="GitHub token (private repo)" style="width:220px" />
           <button class="btn btn-success btn-sm" id="btn-check-update" data-i18n="update.check">Check for Updates</button>
         </div>
         <div class="w-100 small update-result" id="update-result"></div>

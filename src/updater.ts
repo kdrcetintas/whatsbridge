@@ -48,14 +48,18 @@ interface GithubRelease {
   assets: Array<{ name: string; browser_download_url: string }>;
 }
 
-function fetchJson(url: string): Promise<GithubRelease> {
+function fetchJson(url: string, token?: string): Promise<GithubRelease> {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, {
-      headers: { 'User-Agent': `whatsbridge/${currentVersion()}` },
-    }, (res) => {
+    const headers: Record<string, string> = { 'User-Agent': `whatsbridge/${currentVersion()}` };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const req = https.get(url, { headers }, (res) => {
       // Follow redirects
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        resolve(fetchJson(res.headers.location));
+        resolve(fetchJson(res.headers.location, token));
+        return;
+      }
+      if (res.statusCode === 404) {
+        reject(new Error('GITHUB_404'));
         return;
       }
       if (res.statusCode !== 200) {
@@ -75,10 +79,12 @@ function fetchJson(url: string): Promise<GithubRelease> {
 
 // ── Download ──────────────────────────────────────────────────────────────────
 
-function downloadFile(url: string, dest: string, onProgress?: (pct: number) => void): Promise<void> {
+function downloadFile(url: string, dest: string, onProgress?: (pct: number) => void, token?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const doGet = (u: string) => {
-      https.get(u, { headers: { 'User-Agent': `whatsbridge/${currentVersion()}` } }, (res) => {
+      const headers: Record<string, string> = { 'User-Agent': `whatsbridge/${currentVersion()}` };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      https.get(u, { headers }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           doGet(res.headers.location);
           return;
@@ -150,8 +156,8 @@ export interface UpdateInfo {
   downloadUrl?: string;
 }
 
-export async function checkUpdate(): Promise<UpdateInfo> {
-  const release = await fetchJson(`https://api.github.com/repos/${REPO}/releases/latest`);
+export async function checkUpdate(token?: string): Promise<UpdateInfo> {
+  const release = await fetchJson(`https://api.github.com/repos/${REPO}/releases/latest`, token);
   const latest  = release.tag_name;
   const current = currentVersion();
   const has     = isNewer(latest, current);
@@ -166,13 +172,13 @@ export async function checkUpdate(): Promise<UpdateInfo> {
   return { hasUpdate: has, latestVersion: latest, currentVersion: current, downloadUrl };
 }
 
-export async function performUpdate(onProgress?: (pct: number) => void): Promise<string> {
+export async function performUpdate(onProgress?: (pct: number) => void, token?: string): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!(process as any).pkg) {
     throw new Error('Self-update is only supported when running as a compiled binary.');
   }
 
-  const info = await checkUpdate();
+  const info = await checkUpdate(token);
   if (!info.hasUpdate) return info.latestVersion;
   if (!info.downloadUrl) {
     throw new Error(
@@ -183,7 +189,7 @@ export async function performUpdate(onProgress?: (pct: number) => void): Promise
 
   const tmpFile = path.join(os.tmpdir(), path.basename(info.downloadUrl));
   try {
-    await downloadFile(info.downloadUrl, tmpFile, onProgress);
+    await downloadFile(info.downloadUrl, tmpFile, onProgress, token);
     replaceBinary(tmpFile);
   } finally {
     try { fs.unlinkSync(tmpFile); } catch { /* already moved */ }
