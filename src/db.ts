@@ -43,6 +43,7 @@ export interface ListOptions {
   phone?: string;
 }
 
+let SQL: SqlJsStatic;
 let db: Database;
 let dbPath: string;
 
@@ -135,6 +136,18 @@ function runMigrations(): void {
   persist();
 }
 
+function loadDbFromDisk(): void {
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(fileBuffer);
+  } else {
+    db = new SQL.Database();
+  }
+  db.run('PRAGMA journal_mode = WAL');
+  db.run('PRAGMA foreign_keys = ON');
+  runMigrations();
+}
+
 export async function initDb(): Promise<void> {
   const dataDir = getDataDir();
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -144,18 +157,8 @@ export async function initDb(): Promise<void> {
   // which means it works in pkg binaries without any asset extraction tricks.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
-  const SQL: SqlJsStatic = await initSqlJs();
-
-  if (fs.existsSync(dbPath)) {
-    const fileBuffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA journal_mode = WAL');
-  db.run('PRAGMA foreign_keys = ON');
-  runMigrations();
+  SQL = await initSqlJs();
+  loadDbFromDisk();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -164,22 +167,43 @@ export function generateId(): string {
   return 'wb_' + crypto.randomUUID().replace(/-/g, '');
 }
 
+function withRecovery<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('no such table')) {
+      console.warn('[DB] Missing table detected, reloading database from disk...');
+      loadDbFromDisk();
+      return fn();
+    }
+    throw e;
+  }
+}
+
 function queryOne(sql: string, params: Param[] = []): Row | null {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  if (!stmt.step()) { stmt.free(); return null; }
-  const row = stmt.getAsObject() as Row;
-  stmt.free();
-  return row;
+  return withRecovery(() => {
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    if (!stmt.step()) { stmt.free(); return null; }
+    const row = stmt.getAsObject() as Row;
+    stmt.free();
+    return row;
+  });
 }
 
 function queryAll(sql: string, params: Param[] = []): Row[] {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows: Row[] = [];
-  while (stmt.step()) rows.push(stmt.getAsObject() as Row);
-  stmt.free();
-  return rows;
+  return withRecovery(() => {
+    const stmt = db.prepare(sql);
+    stmt.bind(params);
+    const rows: Row[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as Row);
+    stmt.free();
+    return rows;
+  });
+}
+
+function dbRun(sql: string, params: Param[] = []): void {
+  withRecovery(() => db.run(sql, params));
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -193,7 +217,7 @@ export function createMessage(data: {
 }): Message {
   const id  = generateId();
   const now = Date.now();
-  db.run(
+  dbRun(
     `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
     [id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now],
@@ -209,7 +233,7 @@ export function updateMessage(
   error?: string,
 ): void {
   const sentAt = status === 'sent' ? Date.now() : null;
-  db.run(
+  dbRun(
     `UPDATE messages SET status = ?, whatsapp_id = ?, error = ?, sent_at = ? WHERE id = ?`,
     [status, whatsappId ?? null, error ?? null, sentAt, id],
   );
@@ -251,7 +275,7 @@ export function listMessages(opts: ListOptions = {}): { messages: Message[]; tot
 export function createReceivedMessage(data: { phone: string; body: string }): void {
   const id  = generateId();
   const now = Date.now();
-  db.run(
+  dbRun(
     `INSERT INTO messages (id, phone, type, body, status, direction, queued_at, created_at)
      VALUES (?, ?, 'text', ?, 'sent', 'inbound', ?, ?)`,
     [id, data.phone, data.body || null, now, now],
