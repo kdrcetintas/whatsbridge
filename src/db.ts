@@ -43,8 +43,8 @@ export interface ListOptions {
   phone?: string;
 }
 
+// SQL is initialized once at startup; Database objects are opened per-operation.
 let SQL: SqlJsStatic;
-let db: Database;
 let dbPath: string;
 
 // ── Migrations ────────────────────────────────────────────────────────────────
@@ -100,52 +100,49 @@ const MIGRATIONS: Migration[] = [
   },
 ];
 
-function persist(): void {
-  const data = db.export();
-  fs.writeFileSync(dbPath, Buffer.from(data));
+function openDb(): Database {
+  const db = fs.existsSync(dbPath)
+    ? new SQL.Database(fs.readFileSync(dbPath))
+    : new SQL.Database();
+  db.run('PRAGMA foreign_keys = ON');
+  return db;
+}
+
+function saveDb(db: Database): void {
+  fs.writeFileSync(dbPath, Buffer.from(db.export()));
 }
 
 function runMigrations(): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version     INTEGER PRIMARY KEY,
-      description TEXT    NOT NULL,
-      applied_at  INTEGER NOT NULL
-    )
-  `);
+  const db = openDb();
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version     INTEGER PRIMARY KEY,
+        description TEXT    NOT NULL,
+        applied_at  INTEGER NOT NULL
+      )
+    `);
 
-  const applied = new Set<number>();
-  const stmt = db.prepare('SELECT version FROM schema_migrations');
-  while (stmt.step()) {
-    const row = stmt.getAsObject() as { version: number };
-    applied.add(row.version);
+    const applied = new Set<number>();
+    const stmt = db.prepare('SELECT version FROM schema_migrations');
+    while (stmt.step()) applied.add((stmt.getAsObject() as { version: number }).version);
+    stmt.free();
+
+    const pending = MIGRATIONS.filter((m) => !applied.has(m.version));
+    if (pending.length === 0) return;
+
+    for (const migration of pending) {
+      db.exec(migration.up);
+      db.run(
+        'INSERT INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)',
+        [migration.version, migration.description, Date.now()],
+      );
+      console.log(`[DB] Migration ${migration.version} applied: ${migration.description}`);
+    }
+    saveDb(db);
+  } finally {
+    db.close();
   }
-  stmt.free();
-
-  const pending = MIGRATIONS.filter((m) => !applied.has(m.version));
-  if (pending.length === 0) return;
-
-  for (const migration of pending) {
-    db.exec(migration.up);
-    db.run(
-      'INSERT INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)',
-      [migration.version, migration.description, Date.now()],
-    );
-    console.log(`[DB] Migration ${migration.version} applied: ${migration.description}`);
-  }
-  persist();
-}
-
-function loadDbFromDisk(): void {
-  if (fs.existsSync(dbPath)) {
-    const fileBuffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-  db.run('PRAGMA journal_mode = WAL');
-  db.run('PRAGMA foreign_keys = ON');
-  runMigrations();
 }
 
 export async function initDb(): Promise<void> {
@@ -158,52 +155,37 @@ export async function initDb(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
   SQL = await initSqlJs();
-  loadDbFromDisk();
+  runMigrations();
+}
+
+// ── Per-operation helpers ─────────────────────────────────────────────────────
+// Each helper opens a fresh Database from disk, executes, then closes.
+// This keeps the asm.js heap bounded and eliminates long-running memory issues.
+
+function withDb<T>(fn: (db: Database) => T): T {
+  const db = openDb();
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
+}
+
+function withDbWrite<T>(fn: (db: Database) => T): T {
+  const db = openDb();
+  try {
+    const result = fn(db);
+    saveDb(db);
+    return result;
+  } finally {
+    db.close();
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export function generateId(): string {
   return 'wb_' + crypto.randomUUID().replace(/-/g, '');
-}
-
-function withRecovery<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (e) {
-    if (e instanceof Error && e.message.includes('no such table')) {
-      console.warn('[DB] Missing table detected, reloading database from disk...');
-      loadDbFromDisk();
-      return fn();
-    }
-    throw e;
-  }
-}
-
-function queryOne(sql: string, params: Param[] = []): Row | null {
-  return withRecovery(() => {
-    const stmt = db.prepare(sql);
-    stmt.bind(params);
-    if (!stmt.step()) { stmt.free(); return null; }
-    const row = stmt.getAsObject() as Row;
-    stmt.free();
-    return row;
-  });
-}
-
-function queryAll(sql: string, params: Param[] = []): Row[] {
-  return withRecovery(() => {
-    const stmt = db.prepare(sql);
-    stmt.bind(params);
-    const rows: Row[] = [];
-    while (stmt.step()) rows.push(stmt.getAsObject() as Row);
-    stmt.free();
-    return rows;
-  });
-}
-
-function dbRun(sql: string, params: Param[] = []): void {
-  withRecovery(() => db.run(sql, params));
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -217,13 +199,19 @@ export function createMessage(data: {
 }): Message {
   const id  = generateId();
   const now = Date.now();
-  dbRun(
-    `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-    [id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now],
-  );
-  persist();
-  return getMessageOrThrow(id);
+  return withDbWrite((db) => {
+    db.run(
+      `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+      [id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now],
+    );
+    const stmt = db.prepare('SELECT * FROM messages WHERE id = ?');
+    stmt.bind([id]);
+    stmt.step();
+    const row = stmt.getAsObject() as Row;
+    stmt.free();
+    return toMessage(row);
+  });
 }
 
 export function updateMessage(
@@ -233,77 +221,98 @@ export function updateMessage(
   error?: string,
 ): void {
   const sentAt = status === 'sent' ? Date.now() : null;
-  dbRun(
-    `UPDATE messages SET status = ?, whatsapp_id = ?, error = ?, sent_at = ? WHERE id = ?`,
-    [status, whatsappId ?? null, error ?? null, sentAt, id],
-  );
-  persist();
+  withDbWrite((db) => {
+    db.run(
+      `UPDATE messages SET status = ?, whatsapp_id = ?, error = ?, sent_at = ? WHERE id = ?`,
+      [status, whatsappId ?? null, error ?? null, sentAt, id],
+    );
+  });
 }
 
 export function getMessage(id: string): Message | null {
-  const row = queryOne('SELECT * FROM messages WHERE id = ?', [id]);
-  return row ? toMessage(row) : null;
-}
-
-function getMessageOrThrow(id: string): Message {
-  const msg = getMessage(id);
-  if (!msg) throw new Error(`Message ${id} not found`);
-  return msg;
+  return withDb((db) => {
+    const stmt = db.prepare('SELECT * FROM messages WHERE id = ?');
+    stmt.bind([id]);
+    if (!stmt.step()) { stmt.free(); return null; }
+    const row = stmt.getAsObject() as Row;
+    stmt.free();
+    return toMessage(row);
+  });
 }
 
 export function listMessages(opts: ListOptions = {}): { messages: Message[]; total: number } {
   const { limit = 50, offset = 0, status, phone } = opts;
   const conditions: string[] = [];
-  const params: unknown[]    = [];
+  const params: Param[]      = [];
 
   if (status) { conditions.push('status = ?'); params.push(status); }
   if (phone)  { conditions.push('phone = ?');  params.push(phone);  }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
-  const countRow = queryOne(`SELECT COUNT(*) as n FROM messages ${where}`, params);
-  const total = countRow ? (countRow['n'] as number) : 0;
+  return withDb((db) => {
+    const countStmt = db.prepare(`SELECT COUNT(*) as n FROM messages ${where}`);
+    countStmt.bind(params);
+    countStmt.step();
+    const total = Number((countStmt.getAsObject() as { n: number }).n) || 0;
+    countStmt.free();
 
-  const messages = queryAll(
-    `SELECT * FROM messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset],
-  ).map(toMessage);
+    const msgStmt = db.prepare(
+      `SELECT * FROM messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    );
+    msgStmt.bind([...params, limit, offset]);
+    const messages: Message[] = [];
+    while (msgStmt.step()) messages.push(toMessage(msgStmt.getAsObject() as Row));
+    msgStmt.free();
 
-  return { messages, total };
+    return { messages, total };
+  });
 }
 
 export function createReceivedMessage(data: { phone: string; body: string }): void {
   const id  = generateId();
   const now = Date.now();
-  dbRun(
-    `INSERT INTO messages (id, phone, type, body, status, direction, queued_at, created_at)
-     VALUES (?, ?, 'text', ?, 'sent', 'inbound', ?, ?)`,
-    [id, data.phone, data.body || null, now, now],
-  );
-  persist();
+  withDbWrite((db) => {
+    db.run(
+      `INSERT INTO messages (id, phone, type, body, status, direction, queued_at, created_at)
+       VALUES (?, ?, 'text', ?, 'sent', 'inbound', ?, ?)`,
+      [id, data.phone, data.body || null, now, now],
+    );
+  });
 }
 
 export function getStats(): Stats {
-  const row = queryOne(`
-    SELECT
-      SUM(CASE WHEN direction='outbound' AND status='sent'   THEN 1 ELSE 0 END) AS sent,
-      SUM(CASE WHEN direction='outbound' AND status='queued' THEN 1 ELSE 0 END) AS queued,
-      SUM(CASE WHEN direction='outbound' AND status='failed' THEN 1 ELSE 0 END) AS failed,
-      SUM(CASE WHEN direction='inbound'                      THEN 1 ELSE 0 END) AS received
-    FROM messages
-  `);
-  return {
-    sent:     Number(row?.['sent'])     || 0,
-    queued:   Number(row?.['queued'])   || 0,
-    failed:   Number(row?.['failed'])   || 0,
-    received: Number(row?.['received']) || 0,
-  };
+  return withDb((db) => {
+    const stmt = db.prepare(`
+      SELECT
+        SUM(CASE WHEN direction='outbound' AND status='sent'   THEN 1 ELSE 0 END) AS sent,
+        SUM(CASE WHEN direction='outbound' AND status='queued' THEN 1 ELSE 0 END) AS queued,
+        SUM(CASE WHEN direction='outbound' AND status='failed' THEN 1 ELSE 0 END) AS failed,
+        SUM(CASE WHEN direction='inbound'                      THEN 1 ELSE 0 END) AS received
+      FROM messages
+    `);
+    stmt.step();
+    const row = stmt.getAsObject() as Row;
+    stmt.free();
+    return {
+      sent:     Number(row['sent'])     || 0,
+      queued:   Number(row['queued'])   || 0,
+      failed:   Number(row['failed'])   || 0,
+      received: Number(row['received']) || 0,
+    };
+  });
 }
 
 export function getPendingMessages(): Message[] {
-  return queryAll(
-    `SELECT * FROM messages WHERE status IN ('queued','sending') ORDER BY queued_at ASC`,
-  ).map(toMessage);
+  return withDb((db) => {
+    const stmt = db.prepare(
+      `SELECT * FROM messages WHERE status IN ('queued','sending') ORDER BY queued_at ASC`,
+    );
+    const rows: Message[] = [];
+    while (stmt.step()) rows.push(toMessage(stmt.getAsObject() as Row));
+    stmt.free();
+    return rows;
+  });
 }
 
 function toMessage(row: Row): Message {

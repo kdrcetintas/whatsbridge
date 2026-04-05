@@ -85,7 +85,11 @@ export function createApp(config: Config): express.Application {
   });
 
   app.get('/stats', requireSession, (_req, res) => {
-    res.json(getStats());
+    try {
+      res.json(getStats());
+    } catch (err: unknown) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'Database unavailable' });
+    }
   });
 
   app.get('/version', requireSession, (_req, res) => {
@@ -219,21 +223,33 @@ export function createApp(config: Config): express.Application {
   // ── Message history ────────────────────────────────────────────────────────
 
   app.get('/api/messages', apiAuth, (req: Request, res: Response) => {
-    const limit  = Math.min(Number(req.query['limit'])  || 50, 200);
-    const offset = Number(req.query['offset']) || 0;
-    const status = req.query['status'] as string | undefined;
-    const phone  = req.query['phone']  as string | undefined;
-    res.json(listMessages({ limit, offset, status: status as any, phone }));
+    try {
+      const limit  = Math.min(Number(req.query['limit'])  || 50, 200);
+      const offset = Number(req.query['offset']) || 0;
+      const status = req.query['status'] as string | undefined;
+      const phone  = req.query['phone']  as string | undefined;
+      res.json(listMessages({ limit, offset, status: status as any, phone }));
+    } catch (err: unknown) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'Database unavailable' });
+    }
   });
 
   app.get('/api/stats', apiAuth, (_req, res) => {
-    res.json(getStats());
+    try {
+      res.json(getStats());
+    } catch (err: unknown) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'Database unavailable' });
+    }
   });
 
   app.get('/api/messages/:id', apiAuth, (req: Request, res: Response) => {
-    const msg = getMessage(String(req.params['id']));
-    if (!msg) { res.status(404).json({ error: 'Message not found' }); return; }
-    res.json(msg);
+    try {
+      const msg = getMessage(String(req.params['id']));
+      if (!msg) { res.status(404).json({ error: 'Message not found' }); return; }
+      res.json(msg);
+    } catch (err: unknown) {
+      res.status(503).json({ error: err instanceof Error ? err.message : 'Database unavailable' });
+    }
   });
 
   // Static files last
