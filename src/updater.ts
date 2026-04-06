@@ -45,7 +45,7 @@ function assetName(version: string): string {
 
 interface GithubRelease {
   tag_name: string;
-  assets: Array<{ name: string; browser_download_url: string }>;
+  assets: Array<{ name: string; url: string; browser_download_url: string }>;
 }
 
 function fetchJson(url: string, token?: string): Promise<GithubRelease> {
@@ -81,12 +81,17 @@ function fetchJson(url: string, token?: string): Promise<GithubRelease> {
 
 function downloadFile(url: string, dest: string, onProgress?: (pct: number) => void, token?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const doGet = (u: string) => {
-      const headers: Record<string, string> = { 'User-Agent': `whatsbridge/${currentVersion()}` };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+    const doGet = (u: string, withAuth: boolean) => {
+      const headers: Record<string, string> = {
+        'User-Agent': `whatsbridge/${currentVersion()}`,
+        'Accept': 'application/octet-stream',
+      };
+      // Only send auth header to GitHub API — not to S3 redirect targets
+      if (token && withAuth) headers['Authorization'] = `Bearer ${token}`;
       https.get(u, { headers }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          doGet(res.headers.location);
+          // Don't forward auth on redirect (S3 signed URLs reject extra auth headers)
+          doGet(res.headers.location, false);
           return;
         }
         if (res.statusCode !== 200) {
@@ -106,7 +111,7 @@ function downloadFile(url: string, dest: string, onProgress?: (pct: number) => v
         res.on('error',  reject);
       }).on('error', reject);
     };
-    doGet(url);
+    doGet(url, true);
   });
 }
 
@@ -166,7 +171,9 @@ export async function checkUpdate(token?: string): Promise<UpdateInfo> {
   if (has) {
     const name  = assetName(latest);
     const asset = release.assets.find((a) => a.name === name);
-    downloadUrl = asset?.browser_download_url;
+    // Use the API URL when a token is present (private repo) — browser_download_url
+    // returns 404 for private repos even with a valid token.
+    downloadUrl = asset ? (token ? asset.url : asset.browser_download_url) : undefined;
   }
 
   return { hasUpdate: has, latestVersion: latest, currentVersion: current, downloadUrl };
