@@ -11,6 +11,6 @@ const ext    = process.platform === 'win32' ? '.exe' : '';
 const output = `bin/whatsbridge-v${version}-${platform}-${arch}${ext}`;
 
 execSync(
-  `npx @yao-pkg/pkg package.json --target node20 --output ${output}`,
+  `npx @yao-pkg/pkg package.json --target node24 --output ${output}`,
   { stdio: 'inherit' },
 );

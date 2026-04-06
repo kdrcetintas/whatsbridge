@@ -1,13 +1,8 @@
-import { Database, SqlJsStatic } from 'sql.js';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import { getDataDir } from './config';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Row = Record<string, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Param = any;
 
 export type MessageStatus = 'queued' | 'sending' | 'sent' | 'failed';
 export type MessageType   = 'text' | 'image';
@@ -43,33 +38,11 @@ export interface ListOptions {
   phone?: string;
 }
 
-// SQL module instance — owns the asm.js heap. Re-initialized periodically to
-// prevent heap exhaustion, since the asm.js heap can grow but never shrink.
-let SQL: SqlJsStatic;
-let dbPath: string;
-let reinitPromise: Promise<void> | null = null;
-
-async function reinitSqlModule(): Promise<void> {
-  if (reinitPromise) return reinitPromise;
-  console.warn('[DB] Re-initializing sql.js module to reset asm.js heap...');
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
-  reinitPromise = initSqlJs()
-    .then((s) => { SQL = s; console.log('[DB] sql.js module re-initialized.'); })
-    .catch((e: Error) => { console.error('[DB] sql.js reinit failed:', e.message); })
-    .finally(() => { reinitPromise = null; });
-  return reinitPromise;
-}
+let db: DatabaseSync;
 
 // ── Migrations ────────────────────────────────────────────────────────────────
 
-interface Migration {
-  version: number;
-  description: string;
-  up: string;
-}
-
-const MIGRATIONS: Migration[] = [
+const MIGRATIONS = [
   {
     version: 1,
     description: 'Create messages table',
@@ -114,100 +87,38 @@ const MIGRATIONS: Migration[] = [
   },
 ];
 
-function openDb(): Database {
-  if (reinitPromise) throw new Error('Database is reinitializing, please retry shortly');
-  try {
-    const db = fs.existsSync(dbPath)
-      ? new SQL.Database(fs.readFileSync(dbPath))
-      : new SQL.Database();
-    db.run('PRAGMA foreign_keys = ON');
-    return db;
-  } catch (e) {
-    if (e instanceof Error && (e.message.includes('OOM') || e.message.includes('Aborted'))) {
-      console.error('[DB] OOM on openDb, scheduling sql.js reinit...');
-      reinitSqlModule().catch(console.error);
-      throw new Error('Database is temporarily unavailable (OOM), please retry shortly');
-    }
-    throw e;
-  }
-}
-
-function saveDb(db: Database): void {
-  fs.writeFileSync(dbPath, Buffer.from(db.export()));
-}
-
 function runMigrations(): void {
-  const db = openDb();
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version     INTEGER PRIMARY KEY,
-        description TEXT    NOT NULL,
-        applied_at  INTEGER NOT NULL
-      )
-    `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version     INTEGER PRIMARY KEY,
+      description TEXT    NOT NULL,
+      applied_at  INTEGER NOT NULL
+    )
+  `);
 
-    const applied = new Set<number>();
-    const stmt = db.prepare('SELECT version FROM schema_migrations');
-    while (stmt.step()) applied.add((stmt.getAsObject() as { version: number }).version);
-    stmt.free();
+  const applied = new Set(
+    (db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[])
+      .map((r) => r.version),
+  );
 
-    const pending = MIGRATIONS.filter((m) => !applied.has(m.version));
-    if (pending.length === 0) return;
-
-    for (const migration of pending) {
-      db.exec(migration.up);
-      db.run(
-        'INSERT INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)',
-        [migration.version, migration.description, Date.now()],
-      );
-      console.log(`[DB] Migration ${migration.version} applied: ${migration.description}`);
-    }
-    saveDb(db);
-  } finally {
-    db.close();
+  for (const m of MIGRATIONS) {
+    if (applied.has(m.version)) continue;
+    db.exec(m.up);
+    db.prepare('INSERT INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)')
+      .run(m.version, m.description, Date.now());
+    console.log(`[DB] Migration ${m.version} applied: ${m.description}`);
   }
 }
 
-export async function initDb(): Promise<void> {
+export function initDb(): void {
   const dataDir = getDataDir();
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  dbPath = path.join(dataDir, 'whatsbridge.db');
+  const dbPath = path.join(dataDir, 'whatsbridge.db');
 
-  // Use the asm.js build of sql.js — pure JavaScript, no WASM file needed,
-  // which means it works in pkg binaries without any asset extraction tricks.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
-  SQL = await initSqlJs();
+  db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
   runMigrations();
-
-  // Reinit sql.js every 2 hours to prevent asm.js heap exhaustion.
-  // The heap can grow but never shrink; a fresh module instance resets it.
-  setInterval(() => reinitSqlModule().catch(console.error), 2 * 60 * 60 * 1000);
-}
-
-// ── Per-operation helpers ─────────────────────────────────────────────────────
-// Each helper opens a fresh Database from disk, executes, then closes.
-// This keeps the asm.js heap bounded and eliminates long-running memory issues.
-
-function withDb<T>(fn: (db: Database) => T): T {
-  const db = openDb();
-  try {
-    return fn(db);
-  } finally {
-    db.close();
-  }
-}
-
-function withDbWrite<T>(fn: (db: Database) => T): T {
-  const db = openDb();
-  try {
-    const result = fn(db);
-    saveDb(db);
-    return result;
-  } finally {
-    db.close();
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -227,19 +138,11 @@ export function createMessage(data: {
 }): Message {
   const id  = generateId();
   const now = Date.now();
-  return withDbWrite((db) => {
-    db.run(
-      `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-      [id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now],
-    );
-    const stmt = db.prepare('SELECT * FROM messages WHERE id = ?');
-    stmt.bind([id]);
-    stmt.step();
-    const row = stmt.getAsObject() as Row;
-    stmt.free();
-    return toMessage(row);
-  });
+  db.prepare(
+    `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+  ).run(id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now);
+  return getMessage(id)!;
 }
 
 export function updateMessage(
@@ -249,114 +152,82 @@ export function updateMessage(
   error?: string,
 ): void {
   const sentAt = status === 'sent' ? Date.now() : null;
-  withDbWrite((db) => {
-    db.run(
-      `UPDATE messages SET status = ?, whatsapp_id = ?, error = ?, sent_at = ? WHERE id = ?`,
-      [status, whatsappId ?? null, error ?? null, sentAt, id],
-    );
-  });
+  db.prepare(
+    `UPDATE messages SET status = ?, whatsapp_id = ?, error = ?, sent_at = ? WHERE id = ?`,
+  ).run(status, whatsappId ?? null, error ?? null, sentAt, id);
 }
 
 export function getMessage(id: string): Message | null {
-  return withDb((db) => {
-    const stmt = db.prepare('SELECT * FROM messages WHERE id = ?');
-    stmt.bind([id]);
-    if (!stmt.step()) { stmt.free(); return null; }
-    const row = stmt.getAsObject() as Row;
-    stmt.free();
-    return toMessage(row);
-  });
+  const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  return row ? toMessage(row) : null;
 }
 
 export function listMessages(opts: ListOptions = {}): { messages: Message[]; total: number } {
   const { limit = 50, offset = 0, status, phone } = opts;
   const conditions: string[] = [];
-  const params: Param[]      = [];
+  const params: unknown[]    = [];
 
   if (status) { conditions.push('status = ?'); params.push(status); }
   if (phone)  { conditions.push('phone = ?');  params.push(phone);  }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
-  return withDb((db) => {
-    const countStmt = db.prepare(`SELECT COUNT(*) as n FROM messages ${where}`);
-    countStmt.bind(params);
-    countStmt.step();
-    const total = Number((countStmt.getAsObject() as { n: number }).n) || 0;
-    countStmt.free();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p = params as any[];
+  const total = (db.prepare(`SELECT COUNT(*) as n FROM messages ${where}`).get(...p) as { n: number }).n;
+  const messages = (db.prepare(
+    `SELECT * FROM messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  ).all(...p, limit, offset) as Record<string, unknown>[]).map(toMessage);
 
-    const msgStmt = db.prepare(
-      `SELECT * FROM messages ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    msgStmt.bind([...params, limit, offset]);
-    const messages: Message[] = [];
-    while (msgStmt.step()) messages.push(toMessage(msgStmt.getAsObject() as Row));
-    msgStmt.free();
-
-    return { messages, total };
-  });
+  return { messages, total };
 }
 
 export function createReceivedMessage(data: { phone: string; body: string }): void {
   const id  = generateId();
   const now = Date.now();
-  withDbWrite((db) => {
-    db.run(
-      `INSERT INTO messages (id, phone, type, body, status, direction, queued_at, created_at)
-       VALUES (?, ?, 'text', ?, 'sent', 'inbound', ?, ?)`,
-      [id, data.phone, data.body || null, now, now],
-    );
-  });
+  db.prepare(
+    `INSERT INTO messages (id, phone, type, body, status, direction, queued_at, created_at)
+     VALUES (?, ?, 'text', ?, 'sent', 'inbound', ?, ?)`,
+  ).run(id, data.phone, data.body || null, now, now);
 }
 
 export function getStats(): Stats {
-  return withDb((db) => {
-    const stmt = db.prepare(`
-      SELECT
-        SUM(CASE WHEN direction='outbound' AND status='sent'   THEN 1 ELSE 0 END) AS sent,
-        SUM(CASE WHEN direction='outbound' AND status='queued' THEN 1 ELSE 0 END) AS queued,
-        SUM(CASE WHEN direction='outbound' AND status='failed' THEN 1 ELSE 0 END) AS failed,
-        SUM(CASE WHEN direction='inbound'                      THEN 1 ELSE 0 END) AS received
-      FROM messages
-    `);
-    stmt.step();
-    const row = stmt.getAsObject() as Row;
-    stmt.free();
-    return {
-      sent:     Number(row['sent'])     || 0,
-      queued:   Number(row['queued'])   || 0,
-      failed:   Number(row['failed'])   || 0,
-      received: Number(row['received']) || 0,
-    };
-  });
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN direction='outbound' AND status='sent'   THEN 1 ELSE 0 END) AS sent,
+      SUM(CASE WHEN direction='outbound' AND status='queued' THEN 1 ELSE 0 END) AS queued,
+      SUM(CASE WHEN direction='outbound' AND status='failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN direction='inbound'                      THEN 1 ELSE 0 END) AS received
+    FROM messages
+  `).get() as { sent: number; queued: number; failed: number; received: number };
+  return {
+    sent:     Number(row.sent)     || 0,
+    queued:   Number(row.queued)   || 0,
+    failed:   Number(row.failed)   || 0,
+    received: Number(row.received) || 0,
+  };
 }
 
 export function getPendingMessages(): Message[] {
-  return withDb((db) => {
-    const stmt = db.prepare(
-      `SELECT * FROM messages WHERE status IN ('queued','sending') ORDER BY queued_at ASC`,
-    );
-    const rows: Message[] = [];
-    while (stmt.step()) rows.push(toMessage(stmt.getAsObject() as Row));
-    stmt.free();
-    return rows;
-  });
+  return (db.prepare(
+    `SELECT * FROM messages WHERE status IN ('queued','sending') ORDER BY queued_at ASC`,
+  ).all() as Record<string, unknown>[]).map(toMessage);
 }
 
-function toMessage(row: Row): Message {
+function toMessage(row: Record<string, unknown>): Message {
   return {
-    id:         row['id'],
-    phone:      row['phone'],
-    type:       row['type'],
-    body:       row['body'],
-    imageUrl:   row['image_url'],
-    caption:    row['caption'],
-    status:     row['status'],
-    whatsappId: row['whatsapp_id'],
-    error:      row['error'],
-    direction:  row['direction'] ?? 'outbound',
-    queuedAt:   row['queued_at'],
-    sentAt:     row['sent_at'],
-    createdAt:  row['created_at'],
+    id:         row['id'] as string,
+    phone:      row['phone'] as string,
+    type:       row['type'] as MessageType,
+    body:       row['body'] as string | null,
+    imageUrl:   row['image_url'] as string | null,
+    caption:    row['caption'] as string | null,
+    status:     row['status'] as MessageStatus,
+    whatsappId: row['whatsapp_id'] as string | null,
+    error:      row['error'] as string | null,
+    direction:  (row['direction'] as MessageDirection) ?? 'outbound',
+    queuedAt:   row['queued_at'] as number,
+    sentAt:     row['sent_at'] as number | null,
+    createdAt:  row['created_at'] as number,
   };
 }

@@ -264,13 +264,14 @@ export function startServer(config: Config): void {
   const server = app.listen(config.port, () => {
     const url = `http://localhost:${config.port}`;
     log('SERVER', `Running on ${url}`);
-    initDb().then(() => {
+    try {
+      initDb();
       recoverPending();
       connect();
-    }).catch((err: Error) => {
-      log('ERROR', `Database init failed: ${err.message}`);
+    } catch (err: unknown) {
+      log('ERROR', `Database init failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
-    });
+    }
 
     const platform = process.platform;
     const cmd =

@@ -1,6 +1,6 @@
 {
   "name": "whatsbridge",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "WhatsBridge — WhatsApp REST API server with web dashboard",
   "main": "dist/cli.js",
   "bin": {
@@ -46,8 +46,6 @@
       "public/**",
       "vendor/**"
     ],
-    "scripts": [
-      "node_modules/sql.js/dist/sql-asm.js"
-    ]
+    "scripts": []
   }
 }
