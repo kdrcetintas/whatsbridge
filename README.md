@@ -34,7 +34,7 @@ Download the binary for your platform from [Releases](https://github.com/kdrceti
 
 On Linux/macOS, make it executable: `chmod +x whatsbridge-*`
 
-### Option C — Build from source (requires Node.js 20+)
+### Option C — Build from source (requires Node.js 24+)
 
 ```bash
 git clone https://github.com/kdrcetintas/whatsbridge.git
