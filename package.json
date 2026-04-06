@@ -1,6 +1,6 @@
 {
   "name": "whatsbridge",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "WhatsBridge — WhatsApp REST API server with web dashboard",
   "main": "dist/cli.js",
   "bin": {
