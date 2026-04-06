@@ -43,9 +43,23 @@ export interface ListOptions {
   phone?: string;
 }
 
-// SQL is initialized once at startup; Database objects are opened per-operation.
+// SQL module instance — owns the asm.js heap. Re-initialized periodically to
+// prevent heap exhaustion, since the asm.js heap can grow but never shrink.
 let SQL: SqlJsStatic;
 let dbPath: string;
+let reinitPromise: Promise<void> | null = null;
+
+async function reinitSqlModule(): Promise<void> {
+  if (reinitPromise) return reinitPromise;
+  console.warn('[DB] Re-initializing sql.js module to reset asm.js heap...');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
+  reinitPromise = initSqlJs()
+    .then((s) => { SQL = s; console.log('[DB] sql.js module re-initialized.'); })
+    .catch((e: Error) => { console.error('[DB] sql.js reinit failed:', e.message); })
+    .finally(() => { reinitPromise = null; });
+  return reinitPromise;
+}
 
 // ── Migrations ────────────────────────────────────────────────────────────────
 
@@ -101,11 +115,21 @@ const MIGRATIONS: Migration[] = [
 ];
 
 function openDb(): Database {
-  const db = fs.existsSync(dbPath)
-    ? new SQL.Database(fs.readFileSync(dbPath))
-    : new SQL.Database();
-  db.run('PRAGMA foreign_keys = ON');
-  return db;
+  if (reinitPromise) throw new Error('Database is reinitializing, please retry shortly');
+  try {
+    const db = fs.existsSync(dbPath)
+      ? new SQL.Database(fs.readFileSync(dbPath))
+      : new SQL.Database();
+    db.run('PRAGMA foreign_keys = ON');
+    return db;
+  } catch (e) {
+    if (e instanceof Error && (e.message.includes('OOM') || e.message.includes('Aborted'))) {
+      console.error('[DB] OOM on openDb, scheduling sql.js reinit...');
+      reinitSqlModule().catch(console.error);
+      throw new Error('Database is temporarily unavailable (OOM), please retry shortly');
+    }
+    throw e;
+  }
 }
 
 function saveDb(db: Database): void {
@@ -156,6 +180,10 @@ export async function initDb(): Promise<void> {
   const initSqlJs: (config?: object) => Promise<SqlJsStatic> = require('sql.js/dist/sql-asm.js');
   SQL = await initSqlJs();
   runMigrations();
+
+  // Reinit sql.js every 2 hours to prevent asm.js heap exhaustion.
+  // The heap can grow but never shrink; a fresh module instance resets it.
+  setInterval(() => reinitSqlModule().catch(console.error), 2 * 60 * 60 * 1000);
 }
 
 // ── Per-operation helpers ─────────────────────────────────────────────────────
