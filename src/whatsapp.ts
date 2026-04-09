@@ -135,6 +135,7 @@ export async function connect(): Promise<void> {
     for (const msg of messages) {
       if (!msg.key.fromMe && msg.message) {
         const sender = msg.key.remoteJid ?? '';
+        if (sender === 'status@broadcast' || sender.endsWith('@broadcast')) continue;
         const text =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
