@@ -15,6 +15,7 @@
 
   "tab.status": "Status",
   "tab.send": "Send Message",
+  "tab.messages": "Messages",
   "tab.logs": "Logs",
   "tab.docs": "API Docs",
 
@@ -66,6 +67,11 @@
   "docs.status.desc": "Returns the current connection status.",
   "docs.send.desc": "Sends a text message. The number must be registered on WhatsApp.",
   "docs.image.desc": "Sends an image message from a URL.",
+
+  "messages.col.phone": "Phone",
+  "messages.col.message": "Message",
+  "messages.col.status": "Status",
+  "messages.col.time": "Time",
 
   "update.title": "Software Update",
   "update.check": "Check for Updates"

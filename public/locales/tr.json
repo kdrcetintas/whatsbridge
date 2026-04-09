@@ -15,6 +15,7 @@
 
   "tab.status": "Durum",
   "tab.send": "Mesaj Gönder",
+  "tab.messages": "Mesajlar",
   "tab.logs": "Loglar",
   "tab.docs": "API Docs",
 
@@ -66,6 +67,11 @@
   "docs.status.desc": "Mevcut bağlantı durumunu döner.",
   "docs.send.desc": "Metin mesajı gönderir. Numara WhatsApp'ta kayıtlı olmalıdır.",
   "docs.image.desc": "URL üzerinden görsel mesaj gönderir.",
+
+  "messages.col.phone": "Telefon",
+  "messages.col.message": "Mesaj",
+  "messages.col.status": "Durum",
+  "messages.col.time": "Zaman",
 
   "update.title": "Yazılım Güncellemesi",
   "update.check": "Güncelleme Kontrol Et"

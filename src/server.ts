@@ -55,10 +55,11 @@ export function createApp(config: Config): express.Application {
 
   // ── Web UI (session protected) ────────────────────────────────────────────
 
-  app.get('/',     requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'status.html')));
-  app.get('/send', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'send.html')));
-  app.get('/logs', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'logs.html')));
-  app.get('/docs', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'docs.html')));
+  app.get('/',         requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'status.html')));
+  app.get('/send',     requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'send.html')));
+  app.get('/messages', requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'messages.html')));
+  app.get('/logs',     requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'logs.html')));
+  app.get('/docs',     requireSession, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'docs.html')));
 
   app.get('/settings', requireSession, (req: Request, res: Response) => {
     res.json({
