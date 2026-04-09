@@ -172,7 +172,7 @@ export function listMessages(opts: ListOptions = {}): { messages: Message[]; tot
   const conditions: string[] = [];
   const params: unknown[]    = [];
 
-  if (status) { conditions.push('status = ?'); params.push(status); }
+  if (status) { conditions.push('status = ?'); params.push(status); conditions.push("direction = 'outbound'"); }
   if (phone)  { conditions.push('phone = ?');  params.push(phone);  }
 
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
