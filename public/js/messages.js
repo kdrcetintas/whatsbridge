@@ -82,12 +82,14 @@ function renderTable(messages) {
     var badge = m.direction === 'inbound'
       ? '<span class="badge bg-primary">Received</span>'
       : (STATUS_BADGE[m.status] || '<span class="badge bg-secondary">' + m.status + '</span>');
-    var errTip = m.error ? ' title="' + escHtml(m.error) + '"' : '';
-    return '<tr' + errTip + '>' +
+    var errorLine = (m.status === 'failed' && m.error)
+      ? '<div class="text-danger" style="font-size:0.75rem;margin-top:3px">' + escHtml(m.error) + '</div>'
+      : '';
+    return '<tr>' +
       '<td class="ps-3">' + directionIcon(m.direction) + '</td>' +
       '<td class="font-monospace">' + escHtml(m.phone) + '</td>' +
       '<td class="text-truncate" style="max-width:320px">' + msgText(m) + '</td>' +
-      '<td>' + badge + '</td>' +
+      '<td>' + badge + errorLine + '</td>' +
       '<td class="text-muted text-nowrap">' + fmtTime(m.createdAt) + '</td>' +
       '</tr>';
   }).join('');
