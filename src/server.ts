@@ -5,7 +5,7 @@ import { exec } from 'child_process';
 import QRCode from 'qrcode';
 import { Config, saveConfig } from './config';
 import { log, logBus, getRecentLogs, LogEntry } from './logger';
-import { verifyPassword, requireSession, requireApiKey } from './auth';
+import { verifyPassword, requireSession, requireApiKey, requireSessionOrApiKey } from './auth';
 import { connect, getStatus, getQRCode, getAccountInfo } from './whatsapp';
 import { initDb, getMessage, listMessages, getStats } from './db';
 import { sendNow, sendQueued, getQueueLength, getNextSendDelay, recoverPending } from './queue';
@@ -152,6 +152,7 @@ export function createApp(config: Config): express.Application {
   // ── REST API (API key protected) ──────────────────────────────────────────
 
   const apiAuth = requireApiKey(config.apiKey);
+  const sessionOrApi = requireSessionOrApiKey(config.apiKey);
 
   app.get('/api/status', apiAuth, (_req, res) => {
     res.json({
@@ -223,7 +224,7 @@ export function createApp(config: Config): express.Application {
 
   // ── Message history ────────────────────────────────────────────────────────
 
-  app.get('/api/messages', apiAuth, (req: Request, res: Response) => {
+  app.get('/api/messages', sessionOrApi, (req: Request, res: Response) => {
     try {
       const limit  = Math.min(Number(req.query['limit'])  || 50, 200);
       const offset = Number(req.query['offset']) || 0;
@@ -243,7 +244,7 @@ export function createApp(config: Config): express.Application {
     }
   });
 
-  app.get('/api/messages/:id', apiAuth, (req: Request, res: Response) => {
+  app.get('/api/messages/:id', sessionOrApi, (req: Request, res: Response) => {
     try {
       const msg = getMessage(String(req.params['id']));
       if (!msg) { res.status(404).json({ error: 'Message not found' }); return; }

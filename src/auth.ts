@@ -39,3 +39,12 @@ export function requireApiKey(apiKey: string) {
     next();
   };
 }
+
+export function requireSessionOrApiKey(apiKey: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (req.session?.authenticated) { next(); return; }
+    const key = req.query['api_key'];
+    if (key === apiKey) { next(); return; }
+    res.status(401).json({ error: 'Unauthorized' });
+  };
+}
