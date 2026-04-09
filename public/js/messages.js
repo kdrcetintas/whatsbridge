@@ -113,22 +113,22 @@ function scheduleRefresh() {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
+var FILTER_COLORS = { '': 'primary', queued: 'warning', sent: 'success', failed: 'danger', inbound: 'primary' };
+
 document.getElementById('filter-btns').addEventListener('click', function (e) {
   var btn = e.target.closest('[data-filter]');
   if (!btn) return;
+
   document.querySelectorAll('#filter-btns button').forEach(function (b) {
-    b.className = b.className
-      .replace('btn-primary','btn-outline-primary')
-      .replace('btn-warning','btn-outline-warning')
-      .replace('btn-success','btn-outline-success')
-      .replace('btn-danger','btn-outline-danger')
-      .replace(' active','');
+    var color = FILTER_COLORS[b.dataset.filter] || 'secondary';
+    b.classList.remove('btn-' + color, 'active');
+    b.classList.add('btn-outline-' + color);
   });
-  btn.className = btn.className
-    .replace('btn-outline-primary','btn-primary')
-    .replace('btn-outline-warning','btn-warning')
-    .replace('btn-outline-success','btn-success')
-    .replace('btn-outline-danger','btn-danger') + ' active';
+
+  var color = FILTER_COLORS[btn.dataset.filter] || 'secondary';
+  btn.classList.remove('btn-outline-' + color);
+  btn.classList.add('btn-' + color, 'active');
+
   currentFilter = btn.dataset.filter;
   currentOffset = 0;
   clearTimeout(refreshTimer);

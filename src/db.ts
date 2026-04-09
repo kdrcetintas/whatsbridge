@@ -85,6 +85,11 @@ const MIGRATIONS = [
       );
     `,
   },
+  {
+    version: 4,
+    description: 'Delete status broadcast messages',
+    up: `DELETE FROM messages WHERE phone LIKE '%@broadcast';`,
+  },
 ];
 
 function runMigrations(): void {
