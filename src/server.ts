@@ -162,13 +162,17 @@ export function createApp(config: Config): express.Application {
   });
 
   app.post('/api/send', apiAuth, async (req: Request, res: Response) => {
-    const { phone, message, allowQueuing = false } = req.body as {
+    const { phone, message, latitude, longitude, locationName, allowQueuing = false } = req.body as {
       phone: string;
-      message: string;
+      message?: string;
+      latitude?: number;
+      longitude?: number;
+      locationName?: string;
       allowQueuing?: boolean;
     };
-    if (!phone || !message) {
-      res.status(400).json({ error: 'phone and message are required' });
+    const hasLocation = latitude !== undefined && longitude !== undefined;
+    if (!phone || (!message && !hasLocation)) {
+      res.status(400).json({ error: 'phone and at least one of message or latitude+longitude are required' });
       return;
     }
     if (getStatus().status !== 'connected') {
@@ -177,14 +181,33 @@ export function createApp(config: Config): express.Application {
     }
 
     if (allowQueuing) {
-      const msg = sendQueued({ phone, type: 'text', body: message });
-      res.json({ success: true, id: msg.id, status: 'queued' });
+      const result: Record<string, unknown> = { success: true };
+      if (message) {
+        const msg = sendQueued({ phone, type: 'text', body: message });
+        result['id'] = msg.id;
+        result['status'] = 'queued';
+      }
+      if (hasLocation) {
+        const loc = sendQueued({ phone, type: 'location', latitude, longitude, locationName });
+        result['location'] = { id: loc.id, status: 'queued' };
+      }
+      res.json(result);
       return;
     }
 
     try {
-      const { id, whatsappId } = await sendNow({ phone, type: 'text', body: message });
-      res.json({ success: true, id, whatsappId, status: 'sent' });
+      const result: Record<string, unknown> = { success: true };
+      if (message) {
+        const { id, whatsappId } = await sendNow({ phone, type: 'text', body: message });
+        result['id'] = id;
+        result['whatsappId'] = whatsappId;
+        result['status'] = 'sent';
+      }
+      if (hasLocation) {
+        const { id, whatsappId } = await sendNow({ phone, type: 'location', latitude, longitude, locationName });
+        result['location'] = { id, whatsappId, status: 'sent' };
+      }
+      res.json(result);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       res.status(errMsg === 'Number not on WhatsApp' ? 404 : 500).json({ error: errMsg });

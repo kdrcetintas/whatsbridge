@@ -5,7 +5,7 @@ import fs from 'fs';
 import { getDataDir } from './config';
 
 export type MessageStatus = 'queued' | 'sending' | 'sent' | 'failed';
-export type MessageType   = 'text' | 'image';
+export type MessageType   = 'text' | 'image' | 'location';
 export type MessageDirection = 'outbound' | 'inbound';
 
 export interface Message {
@@ -15,6 +15,9 @@ export interface Message {
   body: string | null;
   imageUrl: string | null;
   caption: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  locationName: string | null;
   status: MessageStatus;
   whatsappId: string | null;
   error: string | null;
@@ -90,6 +93,15 @@ const MIGRATIONS = [
     description: 'Delete status broadcast messages',
     up: `DELETE FROM messages WHERE phone LIKE '%@broadcast';`,
   },
+  {
+    version: 5,
+    description: 'Add location columns',
+    up: `
+      ALTER TABLE messages ADD COLUMN latitude  REAL;
+      ALTER TABLE messages ADD COLUMN longitude REAL;
+      ALTER TABLE messages ADD COLUMN location_name TEXT;
+    `,
+  },
 ];
 
 function runMigrations(): void {
@@ -140,13 +152,16 @@ export function createMessage(data: {
   body?: string;
   imageUrl?: string;
   caption?: string;
+  latitude?: number;
+  longitude?: number;
+  locationName?: string;
 }): Message {
   const id  = generateId();
   const now = Date.now();
   db.prepare(
-    `INSERT INTO messages (id, phone, type, body, image_url, caption, status, queued_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-  ).run(id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, now, now);
+    `INSERT INTO messages (id, phone, type, body, image_url, caption, latitude, longitude, location_name, status, queued_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+  ).run(id, data.phone, data.type, data.body ?? null, data.imageUrl ?? null, data.caption ?? null, data.latitude ?? null, data.longitude ?? null, data.locationName ?? null, now, now);
   return getMessage(id)!;
 }
 
@@ -221,18 +236,21 @@ export function getPendingMessages(): Message[] {
 
 function toMessage(row: Record<string, unknown>): Message {
   return {
-    id:         row['id'] as string,
-    phone:      row['phone'] as string,
-    type:       row['type'] as MessageType,
-    body:       row['body'] as string | null,
-    imageUrl:   row['image_url'] as string | null,
-    caption:    row['caption'] as string | null,
-    status:     row['status'] as MessageStatus,
-    whatsappId: row['whatsapp_id'] as string | null,
-    error:      row['error'] as string | null,
-    direction:  (row['direction'] as MessageDirection) ?? 'outbound',
-    queuedAt:   row['queued_at'] as number,
-    sentAt:     row['sent_at'] as number | null,
-    createdAt:  row['created_at'] as number,
+    id:           row['id'] as string,
+    phone:        row['phone'] as string,
+    type:         row['type'] as MessageType,
+    body:         row['body'] as string | null,
+    imageUrl:     row['image_url'] as string | null,
+    caption:      row['caption'] as string | null,
+    latitude:     row['latitude'] as number | null,
+    longitude:    row['longitude'] as number | null,
+    locationName: row['location_name'] as string | null,
+    status:       row['status'] as MessageStatus,
+    whatsappId:   row['whatsapp_id'] as string | null,
+    error:        row['error'] as string | null,
+    direction:    (row['direction'] as MessageDirection) ?? 'outbound',
+    queuedAt:     row['queued_at'] as number,
+    sentAt:       row['sent_at'] as number | null,
+    createdAt:    row['created_at'] as number,
   };
 }

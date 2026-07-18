@@ -9,7 +9,7 @@
  * conflict with each other.
  */
 import { Message, MessageType, createMessage, updateMessage, getPendingMessages } from './db';
-import { sendText, sendImage, getStatus } from './whatsapp';
+import { sendText, sendImage, sendLocation, getStatus } from './whatsapp';
 import { log } from './logger';
 
 const RATE_LIMIT_MS = 5000; // minimum gap between sends
@@ -103,6 +103,8 @@ async function process(): Promise<void> {
       let waId: string;
       if (msg.type === 'text') {
         waId = await sendText(msg.phone, msg.body!);
+      } else if (msg.type === 'location') {
+        waId = await sendLocation(msg.phone, msg.latitude!, msg.longitude!, msg.locationName ?? undefined);
       } else {
         waId = await sendImage(msg.phone, msg.imageUrl!, msg.caption ?? '');
       }
@@ -140,4 +142,7 @@ export interface SendData {
   body?: string;
   imageUrl?: string;
   caption?: string;
+  latitude?: number;
+  longitude?: number;
+  locationName?: string;
 }

@@ -167,3 +167,12 @@ export async function sendImage(phone: string, imageUrl: string, caption: string
   });
   return result!.key.id!;
 }
+
+export async function sendLocation(phone: string, latitude: number, longitude: number, name?: string): Promise<string> {
+  if (!sock) throw new Error('Not connected');
+  const jid = phone.includes('@') ? phone : `${phone}@s.whatsapp.net`;
+  const result = await sock.sendMessage(jid, {
+    location: { degreesLatitude: latitude, degreesLongitude: longitude, name },
+  });
+  return result!.key.id!;
+}
