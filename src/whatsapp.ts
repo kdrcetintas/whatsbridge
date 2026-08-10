@@ -7,6 +7,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import path from 'path';
+import fs from 'fs';
 import { log } from './logger';
 import { getDataDir } from './config';
 import { onConnected as queueOnConnected, recoverPending } from './queue';
@@ -166,6 +167,31 @@ export async function sendImage(phone: string, imageUrl: string, caption: string
     caption,
   });
   return result!.key.id!;
+}
+
+export async function logout(): Promise<void> {
+  isIntentionalClose = true;
+  if (sock) {
+    try { await sock.logout(); } catch { /* ignore */ }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sock.ev as any).removeAllListeners();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sock as any).end(undefined);
+    sock = null;
+  }
+  connectionStatus = 'disconnected';
+  qrCode = null;
+  accountInfo = null;
+  reconnectAttempts = 0;
+  isIntentionalClose = false;
+
+  const authDir = path.join(getDataDir(), 'auth_info');
+  if (fs.existsSync(authDir)) {
+    fs.rmSync(authDir, { recursive: true, force: true });
+    log('INFO', 'Auth info deleted — ready for fresh QR scan');
+  }
+
+  void connect();
 }
 
 export async function sendLocation(phone: string, latitude: number, longitude: number, name?: string): Promise<string> {

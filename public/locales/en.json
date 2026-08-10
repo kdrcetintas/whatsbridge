@@ -30,6 +30,8 @@
   "status.connected.title": "Connected",
   "status.connected.desc": "WhatsApp session is active. The API is ready to use.",
   "status.connected.badge": "Connected",
+  "status.signout.button": "Sign Out from Account",
+  "status.signout.confirm": "This will disconnect and delete the WhatsApp session. You will need to scan the QR code again. Continue?",
 
   "send.warning": "WhatsApp is not connected. Scan the QR code in the Status tab first.",
   "send.text.title": "Text Message",

@@ -115,6 +115,9 @@
               <h5 class="fw-bold mb-2" data-i18n="status.waiting.title">Connecting...</h5>
               <p class="text-muted small mb-3" data-i18n="status.waiting.desc">Establishing connection to WhatsApp servers.</p>
               <span class="badge bg-warning text-dark" data-i18n="status.waiting.badge">Waiting</span>
+              <div class="mt-4">
+                <button class="btn btn-outline-danger btn-sm" id="btn-wa-logout-waiting" data-i18n="status.signout.button">Sign Out from Account</button>
+              </div>
             </div>
 
             <div id="state-qr" style="display:none">
@@ -135,6 +138,9 @@
               <h5 class="fw-bold mb-2" data-i18n="status.connected.title">Connected</h5>
               <p class="text-muted small mb-3" data-i18n="status.connected.desc">WhatsApp session is active. The API is ready to use.</p>
               <span class="badge bg-success" data-i18n="status.connected.badge">Connected</span>
+              <div class="mt-3">
+                <button class="btn btn-outline-danger btn-sm" id="btn-wa-logout-connected" data-i18n="status.signout.button">Sign Out from Account</button>
+              </div>
               <div id="account-card" class="mt-4 p-3 rounded border d-none align-items-center gap-3 text-start bg-light">
                 <div class="wb-avatar-wrap flex-shrink-0">
                   <img id="account-pic" src="" alt="" onerror="this.style.display='none';document.getElementById('account-initials').style.display='flex'" />

@@ -76,6 +76,20 @@ async function fetchAccount() {
   } catch { /* ignore */ }
 }
 
+// ── Sign Out from WhatsApp Account ───────────────────────────────────────────
+async function waLogout() {
+  if (!confirm(t('status.signout.confirm'))) return;
+  try {
+    var res = await fetch('/whatsapp/logout', { method: 'POST' });
+    if (res.ok) {
+      showState('waiting');
+    }
+  } catch { /* ignore */ }
+}
+
+document.getElementById('btn-wa-logout-waiting').addEventListener('click', waLogout);
+document.getElementById('btn-wa-logout-connected').addEventListener('click', waLogout);
+
 // ── Update ────────────────────────────────────────────────────────────────────
 function onSettingsLoaded() { /* settings loaded — nothing extra needed on this page */ }
 
