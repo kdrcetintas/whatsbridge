@@ -99,14 +99,10 @@ export async function connect(): Promise<void> {
         return;
       }
 
-      if (reconnectAttempts < 5) {
-        reconnectAttempts++;
-        const delay = Math.min(reconnectAttempts * 3000, 15000);
-        log('RECONNECT', `Attempt ${reconnectAttempts}/5 in ${delay / 1000}s`);
-        setTimeout(() => connect(), delay);
-      } else {
-        log('RECONNECT', 'Max attempts reached. Restart manually.');
-      }
+      reconnectAttempts++;
+      const delay = Math.min(reconnectAttempts * 5000, 60000);
+      log('RECONNECT', `Attempt ${reconnectAttempts} — retrying in ${delay / 1000}s`);
+      setTimeout(() => connect(), delay);
     } else if (connection === 'open') {
       connectionStatus = 'connected';
       qrCode = null;
@@ -167,6 +163,11 @@ export async function sendImage(phone: string, imageUrl: string, caption: string
     caption,
   });
   return result!.key.id!;
+}
+
+export async function reconnect(): Promise<void> {
+  reconnectAttempts = 0;
+  await connect();
 }
 
 export async function logout(): Promise<void> {

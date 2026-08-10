@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { Config, saveConfig } from './config';
 import { log, logBus, getRecentLogs, LogEntry } from './logger';
 import { verifyPassword, requireSession, requireApiKey, requireSessionOrApiKey } from './auth';
-import { connect, getStatus, getQRCode, getAccountInfo, logout } from './whatsapp';
+import { connect, getStatus, getQRCode, getAccountInfo, logout, reconnect } from './whatsapp';
 import { initDb, getMessage, listMessages, getStats } from './db';
 import { sendNow, sendQueued, getQueueLength, getNextSendDelay, recoverPending } from './queue';
 import { currentVersion, checkUpdate, performUpdate } from './updater';
@@ -76,6 +76,15 @@ export function createApp(config: Config): express.Application {
 
   app.get('/account', requireSession, (_req, res) => {
     res.json(getAccountInfo());
+  });
+
+  app.post('/whatsapp/reconnect', requireSession, async (_req, res) => {
+    try {
+      await reconnect();
+      res.json({ success: true });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   app.post('/whatsapp/logout', requireSession, async (_req, res) => {

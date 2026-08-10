@@ -76,6 +76,15 @@ async function fetchAccount() {
   } catch { /* ignore */ }
 }
 
+// ── Reconnect ─────────────────────────────────────────────────────────────────
+document.getElementById('btn-wa-reconnect').addEventListener('click', async function () {
+  this.disabled = true;
+  try {
+    await fetch('/whatsapp/reconnect', { method: 'POST' });
+  } catch { /* ignore */ }
+  setTimeout(() => { this.disabled = false; }, 3000);
+});
+
 // ── Sign Out from WhatsApp Account ───────────────────────────────────────────
 async function waLogout() {
   if (!confirm(t('status.signout.confirm'))) return;

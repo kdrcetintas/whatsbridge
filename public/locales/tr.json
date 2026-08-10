@@ -30,6 +30,7 @@
   "status.connected.title": "Bağlandı",
   "status.connected.desc": "WhatsApp oturumu aktif. API kullanıma hazır.",
   "status.connected.badge": "Bağlı",
+  "status.reconnect.button": "Yeniden Bağlan",
   "status.signout.button": "Hesaptan Çıkış Yap",
   "status.signout.confirm": "Bu işlem WhatsApp oturumunu kapatacak ve session dosyalarını silecek. Yeniden QR okutmanız gerekecek. Devam edilsin mi?",
 
